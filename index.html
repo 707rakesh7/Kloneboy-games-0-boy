@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Chocolate Crush Mini App</title>
+    <script src='//libtl.com/sdk.js' data-zone='10345048' data-sdk='show_10345048'></script>
+
+    <style>
+        :root { --bg: #3e2723; --board-bg: #2d1b18; }
+        body { margin:0; font-family: sans-serif; background:var(--bg); color:white; display:flex; flex-direction:column; align-items:center; height:100vh; overflow:hidden; touch-action:none; }
+        
+        header { background:#d84315; width:100%; padding:12px; text-align:center; font-weight:bold; font-size:20px; box-shadow:0 4px 8px rgba(0,0,0,0.5); }
+        #stats { display:flex; justify-content:space-around; width:100%; padding:10px; font-weight:bold; font-size:18px; }
+        
+        #game-container { padding:10px; background:var(--board-bg); border-radius:12px; box-shadow:0 8px 25px rgba(0,0,0,0.7); margin-top:10px; }
+        #board { display:grid; grid-template-columns:repeat(6, 52px); grid-template-rows:repeat(6, 52px); gap:4px; position: relative; }
+
+        .candy { width:52px; height:52px; border-radius:8px; cursor:pointer; box-sizing:border-box; border:1px solid rgba(255,255,255,0.1); transition: all 0.2s ease; }
+        
+        /* Choco Box Colors */
+        .c1 { background: #ffccbc; box-shadow: inset -3px -3px #ffab91; } 
+        .c2 { background: #5d4037; border:3px dashed #8d6e63; } 
+        .c3 { background: #ffd54f; box-shadow: inset 0 0 10px #ffb300; } 
+        .c4 { background: #f5f5f5; border-bottom:5px solid #bdbdbd; } 
+        .c5 { background: #21100b; box-shadow: inset 2px 2px #4e342e; } 
+        .c6 { background: repeating-linear-gradient(45deg, #795548, #795548 6px, #4e342e 6px, #4e342e 12px); }
+
+        .match-anim { animation: blast 0.3s forwards; }
+        @keyframes blast { 0% {transform:scale(1);} 100% {transform:scale(0); opacity:0;} }
+
+        /* Ads UI */
+        #ad-banner { position:fixed; bottom:15px; width:310px; height:130px; background:#fff; color:#000; display:none; flex-direction:column; border:3px solid #ff9800; border-radius:10px; z-index:999; }
+        #close-ad { align-self:flex-end; background:#ff4444; color:#fff; padding:3px 12px; font-size:12px; cursor:pointer; font-weight:bold; border-radius: 0 7px 0 7px; }
+        .ad-info { font-size: 11px; color: #555; text-align: center; padding: 5px; background: #f9f9f9; border-top: 1px solid #ddd; border-radius: 0 0 7px 7px; }
+    </style>
+</head>
+<body>
+
+    <header>🍫 Chocolate Crush Mini</header>
+
+    <div id="stats">
+        <div>Score: <span id="score">0</span></div>
+        <div>Combo: <span id="combo">x1</span></div>
+    </div>
+
+    <div id="game-container">
+        <div id="board"></div>
+    </div>
+
+    <div id="ad-banner">
+        <div id="close-ad" onclick="closeAndHideAd()">CLOSE X</div>
+        <div style="text-align:center; flex-grow:1; display:flex; align-items:center; justify-content:center; font-weight:bold;">ADVERTISEMENT</div>
+        <div class="ad-info">विज्ञापन देखें, फिर 5 मिनट तक नहीं आएगा।</div>
+    </div>
+
+    <script>
+        // Online Sound Effects
+        const swapSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
+        const matchSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2017/2017-preview.mp3');
+
+        const rows=6, cols=6;
+        let board=[], score=0, isMoving=false;
+        const types=['c1','c2','c3','c4','c5','c6'];
+        const boardDiv = document.getElementById("board");
+
+        function createBoard() {
+            boardDiv.innerHTML = "";
+            for(let r=0; r<rows; r++) {
+                board[r]=[];
+                for(let c=0; c<cols; c++) {
+                    board[r][c] = types[Math.floor(Math.random()*types.length)];
+                    const tile = document.createElement("div");
+                    tile.id = `t-${r}-${c}`;
+                    tile.className = `candy ${board[r][c]}`;
+                    addSwipeListeners(tile, r, c);
+                    boardDiv.appendChild(tile);
+                }
+            }
+            setTimeout(processMatches, 500);
+        }
+
+        function addSwipeListeners(el, r, c) {
+            let sX, sY;
+            el.addEventListener("touchstart", e => { sX = e.touches[0].clientX; sY = e.touches[0].clientY; }, {passive:true});
+            el.addEventListener("touchend", e => {
+                if (isMoving) return;
+                let eX = e.changedTouches[0].clientX;
+                let eY = e.changedTouches[0].clientY;
+                let dX = eX - sX, dY = eY - sY;
+                if (Math.abs(dX) > 25 || Math.abs(dY) > 25) {
+                    swapSound.play().catch(()=>{}); // Play swap sound
+                    if (Math.abs(dX) > Math.abs(dY)) {
+                        dX > 0 ? forceSwap(r, c, r, c+1) : forceSwap(r, c, r, c-1);
+                    } else {
+                        dY > 0 ? forceSwap(r, c, r+1, c) : forceSwap(r, c, r-1, c);
+                    }
+                }
+            });
+        }
+
+        function forceSwap(r1, c1, r2, c2) {
+            if (r2<0 || r2>=rows || c2<0 || c2>=cols) return;
+            isMoving = true;
+            let temp = board[r1][c1];
+            board[r1][c1] = board[r2][c2];
+            board[r2][c2] = temp;
+            updateDisplay();
+            setTimeout(() => { processMatches(); }, 200);
+        }
+
+        function findMatches() {
+            let matched = [];
+            for (let r=0; r<rows; r++) {
+                for (let c=0; c<cols-2; c++) {
+                    if (board[r][c] && board[r][c] === board[r][c+1] && board[r][c] === board[r][c+2]) 
+                        matched.push([r,c], [r,c+1], [r,c+2]);
+                }
+            }
+            for (let c=0; c<cols; c++) {
+                for (let r=0; r<rows-2; r++) {
+                    if (board[r][c] && board[r][c] === board[r+1][c] && board[r][c] === board[r+2][c]) 
+                        matched.push([r,c], [r+1,c], [r+2,c]);
+                }
+            }
+            return matched;
+        }
+
+        function processMatches() {
+            let matches = findMatches();
+            if (matches.length > 0) {
+                isMoving = true;
+                matchSound.play().catch(()=>{}); // Play match sound
+                let unique = Array.from(new Set(matches.map(a => JSON.stringify(a)))).map(a => JSON.parse(a));
+                unique.forEach(pos => {
+                    let el = document.getElementById(`t-${pos[0]}-${pos[1]}`);
+                    if(el) el.classList.add("match-anim");
+                });
+                setTimeout(() => {
+                    unique.forEach(pos => {
+                        if(board[pos[0]][pos[1]]) { board[pos[0]][pos[1]] = null; score += 10; }
+                    });
+                    fillBoard();
+                    updateDisplay();
+                    setTimeout(processMatches, 300);
+                }, 300);
+            } else { isMoving = false; }
+        }
+
+        function fillBoard() {
+            for (let c = 0; c < cols; c++) {
+                for (let r = rows - 1; r >= 0; r--) {
+                    if (board[r][c] === null) {
+                        for (let k = r - 1; k >= 0; k--) {
+                            if (board[k][c] !== null) {
+                                board[r][c] = board[k][c];
+                                board[k][c] = null;
+                                break;
+                            }
+                        }
+                        if (board[r][c] === null) board[r][c] = types[Math.floor(Math.random()*types.length)];
+                    }
+                }
+            }
+        }
+
+        function updateDisplay() {
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    const tile = document.getElementById(`t-${r}-${c}`);
+                    tile.className = `candy ${board[r][c] || ''}`;
+                }
+            }
+            document.getElementById("score").innerText = score;
+        }
+
+        // --- ADS LOGIC (5 Minute Timer) ---
+        function checkAndShowAd() {
+            const lastAdTime = localStorage.getItem('lastAdTime');
+            const currentTime = new Date().getTime();
+            const fiveMinutes = 5 * 60 * 1000;
+
+            if (!lastAdTime || (currentTime - lastAdTime > fiveMinutes)) {
+                document.getElementById("ad-banner").style.display = "flex";
+                if(window.show_10345048) window.show_10345048();
+            }
+        }
+
+        function closeAndHideAd() {
+            document.getElementById("ad-banner").style.display = "none";
+            localStorage.setItem('lastAdTime', new Date().getTime());
+        }
+
+        createBoard();
+        setTimeout(checkAndShowAd, 8000); 
+        setInterval(checkAndShowAd, 60000);
+    </script>
+</body>
+</html>
